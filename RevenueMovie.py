@@ -42,7 +42,7 @@ st.markdown(
         </h2>
         <h3 style='color: #444; font-weight: normal; margin-top: 5px;'>
             💰 Discover Movies with Similar Revenue 💰 <br>
-            Or Refresh for More Hidden Gems ✨
+            🎯 Select up to 5 movies and get smart recommendations ✨
         </h3>
         <hr style='border: 1px solid #ddd; margin-top: 10px;'>
     </div>
@@ -62,74 +62,76 @@ if "recommendations" not in st.session_state:
     st.session_state["recommendations"] = pd.DataFrame()
 if "feedback_log" not in st.session_state:
     st.session_state["feedback_log"] = []
+if "show_summary" not in st.session_state:
+    st.session_state["show_summary"] = False
+if "sample_movies" not in st.session_state:
+    st.session_state["sample_movies"] = recommender.movies.sample(min(20, len(recommender.movies))).reset_index(drop=True)
 
-# Center: Pick multiple movies
-st.header("🎥 Pick Movies You Watched")
-sample_movies = recommender.movies.sample(min(20, len(recommender.movies))).reset_index(drop=True)
 
-selected_movies = st.multiselect(
-    "Select one or more movies:",
-    sample_movies['title'].tolist()
-)
+# ================== Movie Selection ==================
+st.subheader("🎥 Select Movies You Watched (Max 5)")
 
-if st.button("Confirm Selection"):
-    if selected_movies:
-        # Average revenue of chosen movies
-        selected_revenue = sample_movies[sample_movies['title'].isin(selected_movies)]['revenue'].mean()
+# Display movie table with checkbox selection
+selected_indices = []
+for i, row in st.session_state["sample_movies"].iterrows():
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.write(f"**{row['title']}** (Revenue: ${row['revenue']:,})")
+    with col2:
+        if st.checkbox("Select", key=f"movie_{i}", value=(row['title'] in st.session_state["selected_movies"])):
+            selected_indices.append(i)
 
-        st.session_state["selected_movies"] = selected_movies
+# Update selected movies (limit 5)
+selected_titles = st.session_state["sample_movies"].iloc[selected_indices]['title'].tolist()
+if len(selected_titles) > 5:
+    st.warning("⚠️ You can only select up to 5 movies.")
+    selected_titles = selected_titles[:5]
+st.session_state["selected_movies"] = selected_titles
 
-        # Lock range if not set
-        if not st.session_state["locked_range"]:
-            st.session_state["locked_range"] = (selected_revenue * 0.7, selected_revenue * 1.3)
-
-        # Get recommendations
-        recs, _ = recommender.recommend_by_revenue(selected_revenue, st.session_state["locked_range"])
-        st.session_state["recommendations"] = recs.sample(min(10, len(recs))).reset_index(drop=True)
-
-# Main content
+# Show current selection
 if st.session_state["selected_movies"]:
-    st.subheader(f"🎬 Since you watched {', '.join(st.session_state['selected_movies'])}, you might also like:")
+    st.info(f"✅ Selected Movies: {', '.join(st.session_state['selected_movies'])}")
 
-    # Refresh button
-    if st.button("🔄 Refresh Recommendations"):
-        avg_revenue = st.session_state["recommendations"]['revenue'].mean()
-        recs, _ = recommender.recommend_by_revenue(avg_revenue, st.session_state["locked_range"])
-        st.session_state["recommendations"] = recs.sample(min(10, len(recs))).reset_index(drop=True)
 
-    # Show recommendations in a table
-    if not st.session_state["recommendations"].empty:
-        rec_table = st.session_state["recommendations"].copy()
-        rec_table = rec_table.rename(columns={'title': 'Movie Title', 'revenue': 'Revenue ($)'})
-        rec_table['Revenue ($)'] = rec_table['Revenue ($)'].apply(lambda x: f"${x:,.0f}")
+# ================== Recommendations ==================
+if st.button("📌 Show Recommendations"):
+    all_recs = pd.DataFrame()
+    for title in st.session_state["selected_movies"]:
+        row = recommender.movies[recommender.movies['title'] == title].iloc[0]
+        recs, locked = recommender.recommend_by_revenue(row['revenue'], st.session_state["locked_range"])
+        st.session_state["locked_range"] = locked  # Lock range after first
+        recs = recs[recs['title'] != title]  # remove the selected movie itself
+        all_recs = pd.concat([all_recs, recs])
 
-        st.dataframe(rec_table, width=1000, height=500)
+    if not all_recs.empty:
+        st.session_state["recommendations"] = all_recs.drop_duplicates().sample(min(5, len(all_recs)))
+    else:
+        st.session_state["recommendations"] = pd.DataFrame()
 
-        # Like button
-        liked_movies = st.multiselect(
-            "👍 Select the movies you liked from the recommendations:",
-            rec_table['Movie Title'].tolist()
-        )
+# Display recommendations
+if not st.session_state["recommendations"].empty:
+    st.subheader("🎯 Recommended Movies")
+    st.table(st.session_state["recommendations"].reset_index(drop=True))
 
-        if st.button("Save Feedback"):
-            st.session_state["feedback_log"].append({
-                "watched": st.session_state["selected_movies"],
-                "recommendations": list(rec_table['Movie Title']),
-                "liked": liked_movies
-            })
-            st.success("✅ Feedback saved!")
 
-# Sidebar: Satisfaction Summary
-st.sidebar.header("📊 Evaluation")
-if st.sidebar.button("Show Satisfaction Summary"):
-    st.header("📊 User Satisfaction Summary")
+# ================== Refresh Movie List ==================
+if st.button("🔄 Refresh Movie List"):
+    st.session_state["sample_movies"] = recommender.movies.sample(min(20, len(recommender.movies))).reset_index(drop=True)
+
+
+# ================== Sidebar: Satisfaction Summary ==================
+if st.sidebar.button("📊 Toggle Satisfaction Summary"):
+    st.session_state["show_summary"] = not st.session_state["show_summary"]
+
+if st.session_state["show_summary"]:
+    st.sidebar.header("📊 User Satisfaction Summary")
     total_recs = sum(len(f["recommendations"]) for f in st.session_state["feedback_log"])
     total_likes = sum(len(f["liked"]) for f in st.session_state["feedback_log"])
 
     if total_recs > 0:
         precision = total_likes / total_recs
-        st.write(f"**Total recommendations shown:** {total_recs}")
-        st.write(f"**Total movies liked:** {total_likes}")
-        st.write(f"**Precision (Liked ÷ Recommended):** {precision:.2f}")
+        st.sidebar.write(f"**Total recommendations shown:** {total_recs}")
+        st.sidebar.write(f"**Total movies liked:** {total_likes}")
+        st.sidebar.write(f"**Precision (Liked ÷ Recommended):** {precision:.2f}")
     else:
-        st.info("No feedback collected yet.")
+        st.sidebar.info("No feedback collected yet.")
