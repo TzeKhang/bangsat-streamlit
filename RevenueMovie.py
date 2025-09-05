@@ -2,7 +2,6 @@
 
 import streamlit as st
 import pandas as pd
-import random
 
 class RevenueRecommender:
     def __init__(self, movies_file):
@@ -57,68 +56,72 @@ recommender = RevenueRecommender("dataset/RevenueMovies.csv")
 # Session state
 if "locked_range" not in st.session_state:
     st.session_state["locked_range"] = None
-if "selected_movie" not in st.session_state:
-    st.session_state["selected_movie"] = None
+if "selected_movies" not in st.session_state:
+    st.session_state["selected_movies"] = []
 if "recommendations" not in st.session_state:
     st.session_state["recommendations"] = pd.DataFrame()
 if "feedback_log" not in st.session_state:
     st.session_state["feedback_log"] = []
 
-# Sidebar: Pick a movie
-st.sidebar.header("🎥 Pick a Movie")
+# Center: Pick multiple movies
+st.header("🎥 Pick Movies You Watched")
 sample_movies = recommender.movies.sample(min(20, len(recommender.movies))).reset_index(drop=True)
-movie_choice = st.sidebar.radio(
-    "Select a movie you watched:",
-    sample_movies['title']
+
+selected_movies = st.multiselect(
+    "Select one or more movies:",
+    sample_movies['title'].tolist()
 )
 
-if st.sidebar.button("Confirm Selection"):
-    selected_row = sample_movies[sample_movies['title'] == movie_choice].iloc[0]
-    st.session_state["selected_movie"] = selected_row['title']
-    selected_revenue = selected_row['revenue']
+if st.button("Confirm Selection"):
+    if selected_movies:
+        # Average revenue of chosen movies
+        selected_revenue = sample_movies[sample_movies['title'].isin(selected_movies)]['revenue'].mean()
 
-    # Lock range if not set
-    if not st.session_state["locked_range"]:
-        st.session_state["locked_range"] = (selected_revenue * 0.7, selected_revenue * 1.3)
+        st.session_state["selected_movies"] = selected_movies
 
-    # Get recommendations
-    recs, _ = recommender.recommend_by_revenue(selected_revenue, st.session_state["locked_range"])
-    st.session_state["recommendations"] = recs.sample(min(5, len(recs))).reset_index(drop=True)
+        # Lock range if not set
+        if not st.session_state["locked_range"]:
+            st.session_state["locked_range"] = (selected_revenue * 0.7, selected_revenue * 1.3)
+
+        # Get recommendations
+        recs, _ = recommender.recommend_by_revenue(selected_revenue, st.session_state["locked_range"])
+        st.session_state["recommendations"] = recs.sample(min(10, len(recs))).reset_index(drop=True)
 
 # Main content
-if st.session_state["selected_movie"]:
-    st.subheader(f"🎬 Since you watched **{st.session_state['selected_movie']}**, you might also like:")
+if st.session_state["selected_movies"]:
+    st.subheader(f"🎬 Since you watched {', '.join(st.session_state['selected_movies'])}, you might also like:")
 
     # Refresh button
     if st.button("🔄 Refresh Recommendations"):
-        recs, _ = recommender.recommend_by_revenue(
-            st.session_state["recommendations"]['revenue'].mean(),
-            st.session_state["locked_range"]
-        )
-        st.session_state["recommendations"] = recs.sample(min(5, len(recs))).reset_index(drop=True)
+        avg_revenue = st.session_state["recommendations"]['revenue'].mean()
+        recs, _ = recommender.recommend_by_revenue(avg_revenue, st.session_state["locked_range"])
+        st.session_state["recommendations"] = recs.sample(min(10, len(recs))).reset_index(drop=True)
 
-    # Show recommendations
+    # Show recommendations in a table
     if not st.session_state["recommendations"].empty:
-        liked_movies = []
-        for i, row in st.session_state["recommendations"].iterrows():
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.write(f"**{row['title']}** (Revenue: ${row['revenue']:,})")
-            with col2:
-                if st.button(f"👍 Like {row['title']}", key=row['title']):
-                    liked_movies.append(row['title'])
+        rec_table = st.session_state["recommendations"].copy()
+        rec_table = rec_table.rename(columns={'title': 'Movie Title', 'revenue': 'Revenue ($)'})
+        rec_table['Revenue ($)'] = rec_table['Revenue ($)'].apply(lambda x: f"${x:,.0f}")
 
-        # Save feedback
-        if liked_movies:
+        st.dataframe(rec_table, width=1000, height=500)
+
+        # Like button
+        liked_movies = st.multiselect(
+            "👍 Select the movies you liked from the recommendations:",
+            rec_table['Movie Title'].tolist()
+        )
+
+        if st.button("Save Feedback"):
             st.session_state["feedback_log"].append({
-                "watched": st.session_state["selected_movie"],
-                "recommendations": list(st.session_state["recommendations"]['title']),
+                "watched": st.session_state["selected_movies"],
+                "recommendations": list(rec_table['Movie Title']),
                 "liked": liked_movies
             })
-            st.success(f"✅ Feedback saved for {st.session_state['selected_movie']}")
+            st.success("✅ Feedback saved!")
 
-# Satisfaction Summary
-if st.sidebar.button("📊 Show Satisfaction Summary"):
+# Sidebar: Satisfaction Summary
+st.sidebar.header("📊 Evaluation")
+if st.sidebar.button("Show Satisfaction Summary"):
     st.header("📊 User Satisfaction Summary")
     total_recs = sum(len(f["recommendations"]) for f in st.session_state["feedback_log"])
     total_likes = sum(len(f["liked"]) for f in st.session_state["feedback_log"])
