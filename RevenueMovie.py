@@ -69,6 +69,22 @@ if "user_preferences" not in st.session_state:
     st.session_state["user_preferences"] = []
 
 
+# Callback helpers to enforce mutual exclusivity
+def _on_like_change(title):
+    # If like was checked, force dislike to False
+    like_key = f"like_{title}"
+    dislike_key = f"dislike_{title}"
+    if st.session_state.get(like_key, False):
+        st.session_state[dislike_key] = False
+
+
+def _on_dislike_change(title):
+    dislike_key = f"dislike_{title}"
+    like_key = f"like_{title}"
+    if st.session_state.get(dislike_key, False):
+        st.session_state[like_key] = False
+
+
 # ================== Movie Selection ==================
 st.subheader("🎥 Select Movies You Watched (Max 10)")
 
@@ -83,11 +99,11 @@ for _, row in all_movies_to_show.iterrows():
     with col1:
         st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
     with col2:
-        checked = st.checkbox(
-            "Select",
-            key=f"movie_{row['title']}",
-            value=(row['title'] in st.session_state["selected_movies"])
-        )
+        key = f"movie_{row['title']}"
+        # Ensure key exists so checkbox preserves state across reruns
+        if key not in st.session_state:
+            st.session_state[key] = (row['title'] in st.session_state["selected_movies"])
+        checked = st.checkbox("Select", key=key)
         if checked:
             new_selected_movies.append(row['title'])
 
@@ -149,33 +165,31 @@ if show_recs:
 if not st.session_state["recommendations"].empty:
     st.subheader("🎯 Interested in any of the movies below? Tick to mark as interested, or mark as not interested. Refresh if not interested in any.")
 
-    like_titles = []
-    dislike_titles = []
-
+    # Render like / dislike checkboxes with mutual exclusivity enforced via callbacks
     for _, row in st.session_state["recommendations"].reset_index(drop=True).iterrows():
+        title = row['title']
         col1, col2, col3 = st.columns([4, 1.2, 1.8])
         with col1:
-            st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
+            st.write(f"**{title}** (Popularity: {row['popularity']:.2f})")
+        like_key = f"like_{title}"
+        dislike_key = f"dislike_{title}"
+
+        # Initialize keys if they don't exist
+        if like_key not in st.session_state:
+            st.session_state[like_key] = (title in st.session_state["selected_recommended"])
+        if dislike_key not in st.session_state:
+            st.session_state[dislike_key] = (title in st.session_state["disliked_recommended"])
+
         with col2:
-            like = st.checkbox(
-                "Like",
-                key=f"like_{row['title']}",
-                value=(row['title'] in st.session_state["selected_recommended"]) 
-            )
+            st.checkbox("Like", key=like_key, on_change=_on_like_change, args=(title,))
         with col3:
-            dislike = st.checkbox(
-                "Not interested",
-                key=f"dislike_{row['title']}",
-                value=(row['title'] in st.session_state["disliked_recommended"]) 
-            )
+            st.checkbox("Not interested", key=dislike_key, on_change=_on_dislike_change, args=(title,))
 
-        # Enforce mutual exclusivity in calculation (UI state may show both, but we resolve here)
-        if like:
-            like_titles.append(row['title'])
-        elif dislike:
-            dislike_titles.append(row['title'])
+    # After rendering, collect selections
+    like_titles = [t for t in st.session_state["recommendations"]["title"].tolist() if st.session_state.get(f"like_{t}", False)]
+    dislike_titles = [t for t in st.session_state["recommendations"]["title"].tolist() if st.session_state.get(f"dislike_{t}", False)]
 
-    # Optional cap on positive selections (kept from earlier behavior)
+    # Optional cap on positive selections
     if len(like_titles) > 5:
         st.warning("⚠️ You can only choose up to 5 liked movies from recommendations.")
         like_titles = like_titles[:5]
