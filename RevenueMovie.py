@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from statistics import mean, median, mode, StatisticsError
 
 class PopularityRecommender:
     def __init__(self, movies_file):
@@ -63,31 +64,31 @@ if "sample_movies" not in st.session_state:
     st.session_state["sample_movies"] = recommender.movies.sample(min(20, len(recommender.movies))).reset_index(drop=True)
 if "selected_recommended" not in st.session_state:
     st.session_state["selected_recommended"] = []
+if "user_preferences" not in st.session_state:
+    st.session_state["user_preferences"] = []
 
 
 # ================== Movie Selection ==================
 st.subheader("🎥 Select Movies You Watched (Max 5)")
 
-# Show in table form
-selected = st.multiselect(
-    "Choose up to 5 movies:",
-    options=st.session_state["sample_movies"]["title"].tolist(),
-    default=st.session_state["selected_movies"]
-)
+selected_indices = []
+for i, row in st.session_state["sample_movies"].iterrows():
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
+    with col2:
+        if st.checkbox("Select", key=f"movie_{i}", value=(row['title'] in st.session_state["selected_movies"])):
+            selected_indices.append(i)
 
-if len(selected) > 5:
+selected_titles = st.session_state["sample_movies"].iloc[selected_indices]['title'].tolist()
+if len(selected_titles) > 5:
     st.warning("⚠️ You can only select up to 5 movies.")
-    selected = selected[:5]
+    selected_titles = selected_titles[:5]
 
-st.session_state["selected_movies"] = selected
+st.session_state["selected_movies"] = selected_titles
 
 if st.session_state["selected_movies"]:
     st.info(f"✅ Selected Movies: {', '.join(st.session_state['selected_movies'])}")
-
-st.dataframe(
-    st.session_state["sample_movies"].set_index("title"),
-    use_container_width=True
-)
 
 
 # ================== Buttons: Show + Refresh ==================
@@ -123,21 +124,32 @@ if show_recs:
 if not st.session_state["recommendations"].empty:
     st.subheader("🎯 Recommended Movies")
 
-    rec_titles = st.multiselect(
-        "Choose from recommendations (Max 5):",
-        options=st.session_state["recommendations"]["title"].tolist(),
-        default=st.session_state["selected_recommended"]
-    )
+    rec_indices = []
+    for i, row in st.session_state["recommendations"].reset_index(drop=True).iterrows():
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
+        with col2:
+            if st.checkbox("Choose", key=f"rec_{i}", value=(row['title'] in st.session_state["selected_recommended"])):
+                rec_indices.append(i)
 
-    if len(rec_titles) > 5:
+    selected_recs = st.session_state["recommendations"].iloc[rec_indices]['title'].tolist()
+    if len(selected_recs) > 5:
         st.warning("⚠️ You can only choose up to 5 recommended movies.")
-        rec_titles = rec_titles[:5]
+        selected_recs = selected_recs[:5]
 
-    st.session_state["selected_recommended"] = rec_titles
+    st.session_state["selected_recommended"] = selected_recs
 
     if st.session_state["selected_recommended"]:
         st.success(f"✨ Chosen from recommendations: {', '.join(st.session_state['selected_recommended'])}")
 
+        # Capture user preferences for future reference
+        chosen = st.session_state["recommendations"][
+            st.session_state["recommendations"]["title"].isin(st.session_state["selected_recommended"])
+        ]
+        st.session_state["user_preferences"].extend(chosen.to_dict('records'))
+
+    # Show recommendations table
     st.dataframe(
         st.session_state["recommendations"].set_index("title"),
         use_container_width=True
@@ -147,24 +159,16 @@ if not st.session_state["recommendations"].empty:
     if st.button("🔄 Refresh Recommendations"):
         st.session_state["recommendations"] = st.session_state["recommendations"].sample(frac=1).reset_index(drop=True)
 
-
-# ================== Budget Preference Clustering ==================
-if st.session_state["selected_recommended"]:
-    st.subheader("💡 Popularity Preference Clustering")
-
-    chosen = st.session_state["recommendations"][
-        st.session_state["recommendations"]["title"].isin(st.session_state["selected_recommended"])
-    ]
-
-    if not chosen.empty:
+    # Stats of user preferences
+    if st.session_state["selected_recommended"]:
         pops = chosen["popularity"].values
-        avg_pop = np.mean(pops)
-        std_pop = np.std(pops)
+        try:
+            mode_pop = mode(pops)
+        except StatisticsError:
+            mode_pop = "No unique mode"
 
-        st.write(f"**Average Popularity:** {avg_pop:,.2f}")
-        st.write(f"**Popularity Consistency (Std Dev):** {std_pop:,.2f}")
-
-        if std_pop < avg_pop * 0.3:
-            st.success("✅ Your selections show a **consistent popularity preference**.")
-        else:
-            st.warning("⚠️ Your selections show a **wide popularity range**.")
+        st.subheader("📊 Your Popularity Preferences (Stats)")
+        st.write(f"**Mean:** {mean(pops):.2f}")
+        st.write(f"**Median:** {median(pops):.2f}")
+        st.write(f"**Mode:** {mode_pop}")
+        st.write(f"**Standard Deviation:** {np.std(pops):.2f}")
