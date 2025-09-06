@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from statistics import mean, median, mode, StatisticsError
 
 class PopularityRecommender:
@@ -77,15 +78,18 @@ for i, row in st.session_state["sample_movies"].iterrows():
     with col1:
         st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
     with col2:
-        if st.checkbox("Select", key=f"movie_{i}", value=(row['title'] in st.session_state["selected_movies"])):
+        if st.checkbox("Select", key=f"movie_{row['title']}", value=(row['title'] in st.session_state["selected_movies"])):
             selected_indices.append(i)
 
 selected_titles = st.session_state["sample_movies"].iloc[selected_indices]['title'].tolist()
-if len(selected_titles) > 5:
-    st.warning("⚠️ You can only select up to 5 movies.")
-    selected_titles = selected_titles[:5]
 
-st.session_state["selected_movies"] = selected_titles
+# Merge with previous selections to persist after refresh
+persisted_movies = list(set(st.session_state["selected_movies"]).union(set(selected_titles)))
+if len(persisted_movies) > 5:
+    st.warning("⚠️ You can only select up to 5 movies.")
+    persisted_movies = persisted_movies[:5]
+
+st.session_state["selected_movies"] = persisted_movies
 
 if st.session_state["selected_movies"]:
     st.info(f"✅ Selected Movies: {', '.join(st.session_state['selected_movies'])}")
@@ -98,7 +102,7 @@ with colA:
 with colB:
     refresh_list = st.button("🔄 Refresh Movie List")
 
-# Refresh list of initial movies
+# Refresh list of initial movies (keep selections)
 if refresh_list:
     st.session_state["sample_movies"] = recommender.movies.sample(min(20, len(recommender.movies))).reset_index(drop=True)
 
@@ -130,15 +134,18 @@ if not st.session_state["recommendations"].empty:
         with col1:
             st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
         with col2:
-            if st.checkbox("Choose", key=f"rec_{i}", value=(row['title'] in st.session_state["selected_recommended"])):
+            if st.checkbox("Choose", key=f"rec_{row['title']}", value=(row['title'] in st.session_state["selected_recommended"])):
                 rec_indices.append(i)
 
     selected_recs = st.session_state["recommendations"].iloc[rec_indices]['title'].tolist()
-    if len(selected_recs) > 5:
-        st.warning("⚠️ You can only choose up to 5 recommended movies.")
-        selected_recs = selected_recs[:5]
 
-    st.session_state["selected_recommended"] = selected_recs
+    # Merge with previous selections to persist after refresh
+    persisted_recs = list(set(st.session_state["selected_recommended"]).union(set(selected_recs)))
+    if len(persisted_recs) > 5:
+        st.warning("⚠️ You can only choose up to 5 recommended movies.")
+        persisted_recs = persisted_recs[:5]
+
+    st.session_state["selected_recommended"] = persisted_recs
 
     if st.session_state["selected_recommended"]:
         st.success(f"✨ Chosen from recommendations: {', '.join(st.session_state['selected_recommended'])}")
@@ -155,20 +162,35 @@ if not st.session_state["recommendations"].empty:
         use_container_width=True
     )
 
-    # Refresh recommendations button
+    # Refresh recommendations button (keep selections)
     if st.button("🔄 Refresh Recommendations"):
         st.session_state["recommendations"] = st.session_state["recommendations"].sample(frac=1).reset_index(drop=True)
 
-    # Stats of user preferences
+    # Stats of user preferences as graph
     if st.session_state["selected_recommended"]:
         pops = chosen["popularity"].values
         try:
             mode_pop = mode(pops)
         except StatisticsError:
-            mode_pop = "No unique mode"
+            mode_pop = np.nan
+
+        stats = {
+            "Mean": mean(pops),
+            "Median": median(pops),
+            "Mode": mode_pop if not pd.isna(mode_pop) else 0,
+            "Std Dev": np.std(pops)
+        }
 
         st.subheader("📊 Your Popularity Preferences (Stats)")
-        st.write(f"**Mean:** {mean(pops):.2f}")
-        st.write(f"**Median:** {median(pops):.2f}")
-        st.write(f"**Mode:** {mode_pop}")
-        st.write(f"**Standard Deviation:** {np.std(pops):.2f}")
+        fig, ax = plt.subplots()
+        keys = list(stats.keys())
+        values = [v if isinstance(v, (int, float, np.floating)) else 0 for v in stats.values()]
+        ax.bar(keys, values, color='skyblue')
+        ax.set_ylabel("Value")
+        ax.set_title("Statistics of Selected Preferences")
+
+        # Annotate bars with values
+        for i, v in enumerate(values):
+            ax.text(i, v + 0.01, f"{v:.2f}" if isinstance(v, (int, float, np.floating)) else str(v), ha='center')
+
+        st.pyplot(fig)
