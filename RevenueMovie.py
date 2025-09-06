@@ -78,7 +78,7 @@ for i, row in st.session_state["sample_movies"].iterrows():
     with col1:
         st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
     with col2:
-        if st.checkbox("Select", key=f"movie_{i}", value=(row['title'] in st.session_state["selected_movies"])):
+        if st.checkbox("Select", key=f"movie_{row['title']}", value=(row['title'] in st.session_state["selected_movies"])):
             selected_indices.append(i)
 
 selected_titles = st.session_state["sample_movies"].iloc[selected_indices]['title'].tolist()
@@ -86,7 +86,7 @@ if len(selected_titles) > 10:
     st.warning("⚠️ You can only select up to 10 movies.")
     selected_titles = selected_titles[:10]
 
-st.session_state["selected_movies"] = selected_titles
+st.session_state["selected_movies"] = list(set(st.session_state["selected_movies"]) | set(selected_titles))
 
 if st.session_state["selected_movies"]:
     st.info(f"✅ Selected Movies: {', '.join(st.session_state['selected_movies'])}")
@@ -123,7 +123,7 @@ if show_recs:
 
 # Display recommendations
 if not st.session_state["recommendations"].empty:
-    st.subheader("🎯 Recommended Movies")
+    st.subheader("🎯 Interested in any of the movies below? Tick to mark as interested, refresh if not interested")
 
     rec_indices = []
     for i, row in st.session_state["recommendations"].reset_index(drop=True).iterrows():
@@ -131,7 +131,7 @@ if not st.session_state["recommendations"].empty:
         with col1:
             st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
         with col2:
-            if st.checkbox("Choose", key=f"rec_{i}", value=(row['title'] in st.session_state["selected_recommended"])):
+            if st.checkbox("Choose", key=f"rec_{row['title']}", value=(row['title'] in st.session_state["selected_recommended"])):
                 rec_indices.append(i)
 
     selected_recs = st.session_state["recommendations"].iloc[rec_indices]['title'].tolist()
@@ -139,7 +139,7 @@ if not st.session_state["recommendations"].empty:
         st.warning("⚠️ You can only choose up to 5 recommended movies.")
         selected_recs = selected_recs[:5]
 
-    st.session_state["selected_recommended"] = selected_recs
+    st.session_state["selected_recommended"] = list(set(st.session_state["selected_recommended"]) | set(selected_recs))
 
     if st.session_state["selected_recommended"]:
         st.success(f"✨ Chosen from recommendations: {', '.join(st.session_state['selected_recommended'])}")
@@ -150,19 +150,18 @@ if not st.session_state["recommendations"].empty:
         ]
         st.session_state["user_preferences"].extend(chosen.to_dict('records'))
 
-    # Show recommendations table
-    st.dataframe(
-        st.session_state["recommendations"].set_index("title"),
-        use_container_width=True
-    )
-
     # Refresh recommendations button (keep selections)
     if st.button("🔄 Refresh Recommendations"):
         st.session_state["recommendations"] = st.session_state["recommendations"].sample(frac=1).reset_index(drop=True)
 
     # Stats of user preferences as graph
-    if st.session_state["selected_recommended"]:
-        pops = chosen["popularity"].values
+    all_selected = pd.concat([
+        recommender.movies[recommender.movies['title'].isin(st.session_state["selected_movies"])],
+        recommender.movies[recommender.movies['title'].isin(st.session_state["selected_recommended"])]
+    ])
+
+    if not all_selected.empty:
+        pops = all_selected["popularity"].values
         try:
             mode_pop = mode(pops)
         except StatisticsError:
@@ -171,7 +170,7 @@ if not st.session_state["recommendations"].empty:
         stats = {
             "Mean": mean(pops),
             "Median": median(pops),
-            "Mode": mode_pop if mode_pop != np.nan else "No unique mode",
+            "Mode": mode_pop if not np.isnan(mode_pop) else 0,
             "Std Dev": np.std(pops)
         }
 
