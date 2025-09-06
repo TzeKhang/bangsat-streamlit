@@ -50,7 +50,7 @@ st.markdown(
 )
 
 # Initialize recommender
-recommender = PopularityRecommender("dataset/PopularityMovies.csv")
+recommender = PopularityRecommender("dataset/RevenueMovies.csv")
 
 # Session state
 if "locked_range" not in st.session_state:
