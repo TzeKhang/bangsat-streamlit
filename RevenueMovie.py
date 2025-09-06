@@ -72,21 +72,27 @@ if "user_preferences" not in st.session_state:
 # ================== Movie Selection ==================
 st.subheader("🎥 Select Movies You Watched (Max 10)")
 
-selected_indices = []
-for i, row in st.session_state["sample_movies"].iterrows():
+# Keep previously selected movies always visible
+selected_df = recommender.movies[recommender.movies['title'].isin(st.session_state["selected_movies"])]
+remaining_df = st.session_state["sample_movies"][~st.session_state["sample_movies"]['title'].isin(st.session_state["selected_movies"])]
+all_movies_to_show = pd.concat([selected_df, remaining_df]).drop_duplicates().reset_index(drop=True)
+
+new_selected_movies = []
+for i, row in all_movies_to_show.iterrows():
     col1, col2 = st.columns([3, 1])
     with col1:
         st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
     with col2:
-        if st.checkbox("Select", key=f"movie_{row['title']}", value=(row['title'] in st.session_state["selected_movies"])):
-            selected_indices.append(i)
+        checked = st.checkbox("Select", key=f"movie_{row['title']}", value=(row['title'] in st.session_state["selected_movies"]))
+        if checked:
+            new_selected_movies.append(row['title'])
 
-selected_titles = st.session_state["sample_movies"].iloc[selected_indices]['title'].tolist()
-if len(selected_titles) > 10:
+if len(new_selected_movies) > 10:
     st.warning("⚠️ You can only select up to 10 movies.")
-    selected_titles = selected_titles[:10]
+    new_selected_movies = new_selected_movies[:10]
 
-st.session_state["selected_movies"] = list(set(st.session_state["selected_movies"]) | set(selected_titles))
+# Update session state with current checked movies
+st.session_state["selected_movies"] = new_selected_movies
 
 if st.session_state["selected_movies"]:
     st.info(f"✅ Selected Movies: {', '.join(st.session_state['selected_movies'])}")
@@ -99,9 +105,11 @@ with colA:
 with colB:
     refresh_list = st.button("🔄 Refresh Movie List")
 
-# Refresh list of initial movies (keep selections)
+# Refresh list of initial movies (keep selected intact)
 if refresh_list:
-    st.session_state["sample_movies"] = recommender.movies.sample(min(20, len(recommender.movies))).reset_index(drop=True)
+    new_sample = recommender.movies.sample(min(20, len(recommender.movies))).reset_index(drop=True)
+    # Ensure no duplicates with selected
+    st.session_state["sample_movies"] = pd.concat([selected_df, new_sample]).drop_duplicates().reset_index(drop=True)
 
 
 # ================== Recommendations ==================
@@ -139,15 +147,13 @@ if not st.session_state["recommendations"].empty:
         st.warning("⚠️ You can only choose up to 5 recommended movies.")
         selected_recs = selected_recs[:5]
 
-    st.session_state["selected_recommended"] = list(set(st.session_state["selected_recommended"]) | set(selected_recs))
+    st.session_state["selected_recommended"] = selected_recs
 
     if st.session_state["selected_recommended"]:
         st.success(f"✨ Chosen from recommendations: {', '.join(st.session_state['selected_recommended'])}")
 
         # Capture user preferences for future reference
-        chosen = st.session_state["recommendations"][
-            st.session_state["recommendations"]["title"].isin(st.session_state["selected_recommended"])
-        ]
+        chosen = st.session_state["recommendations"][st.session_state["recommendations"]["title"].isin(st.session_state["selected_recommended"])]
         st.session_state["user_preferences"].extend(chosen.to_dict('records'))
 
     # Refresh recommendations button (keep selections)
