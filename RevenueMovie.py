@@ -18,10 +18,10 @@ class PopularityRecommender:
         self.movies = self.movies[self.movies['popularity'] > 0].reset_index(drop=True)
 
     def recommend_by_popularity(self, popularity, locked_range=None):
-        """Recommend movies within ±30% popularity range"""
+        """Recommend movies within ±15% popularity range"""
         if not locked_range:
-            lower = popularity * 0.7
-            upper = popularity * 1.3
+            lower = popularity * 0.85
+            upper = popularity * 1.15
         else:
             lower, upper = locked_range
 
@@ -43,7 +43,7 @@ st.markdown(
         </h2>
         <h3 style='color: #444; font-weight: normal; margin-top: 5px;'>
             🌟 Discover Movies with Similar Popularity 🌟 <br>
-            🎯 Select up to 5 movies and get smart recommendations ✨
+            🎯 Select up to 10 movies and get smart recommendations ✨
         </h3>
         <hr style='border: 1px solid #ddd; margin-top: 10px;'>
     </div>
@@ -70,7 +70,7 @@ if "user_preferences" not in st.session_state:
 
 
 # ================== Movie Selection ==================
-st.subheader("🎥 Select Movies You Watched (Max 5)")
+st.subheader("🎥 Select Movies You Watched (Max 10)")
 
 selected_indices = []
 for i, row in st.session_state["sample_movies"].iterrows():
@@ -78,18 +78,15 @@ for i, row in st.session_state["sample_movies"].iterrows():
     with col1:
         st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
     with col2:
-        if st.checkbox("Select", key=f"movie_{row['title']}", value=(row['title'] in st.session_state["selected_movies"])):
+        if st.checkbox("Select", key=f"movie_{i}", value=(row['title'] in st.session_state["selected_movies"])):
             selected_indices.append(i)
 
 selected_titles = st.session_state["sample_movies"].iloc[selected_indices]['title'].tolist()
+if len(selected_titles) > 10:
+    st.warning("⚠️ You can only select up to 10 movies.")
+    selected_titles = selected_titles[:10]
 
-# Merge with previous selections to persist after refresh
-persisted_movies = list(set(st.session_state["selected_movies"]).union(set(selected_titles)))
-if len(persisted_movies) > 5:
-    st.warning("⚠️ You can only select up to 5 movies.")
-    persisted_movies = persisted_movies[:5]
-
-st.session_state["selected_movies"] = persisted_movies
+st.session_state["selected_movies"] = selected_titles
 
 if st.session_state["selected_movies"]:
     st.info(f"✅ Selected Movies: {', '.join(st.session_state['selected_movies'])}")
@@ -134,18 +131,15 @@ if not st.session_state["recommendations"].empty:
         with col1:
             st.write(f"**{row['title']}** (Popularity: {row['popularity']:.2f})")
         with col2:
-            if st.checkbox("Choose", key=f"rec_{row['title']}", value=(row['title'] in st.session_state["selected_recommended"])):
+            if st.checkbox("Choose", key=f"rec_{i}", value=(row['title'] in st.session_state["selected_recommended"])):
                 rec_indices.append(i)
 
     selected_recs = st.session_state["recommendations"].iloc[rec_indices]['title'].tolist()
-
-    # Merge with previous selections to persist after refresh
-    persisted_recs = list(set(st.session_state["selected_recommended"]).union(set(selected_recs)))
-    if len(persisted_recs) > 5:
+    if len(selected_recs) > 5:
         st.warning("⚠️ You can only choose up to 5 recommended movies.")
-        persisted_recs = persisted_recs[:5]
+        selected_recs = selected_recs[:5]
 
-    st.session_state["selected_recommended"] = persisted_recs
+    st.session_state["selected_recommended"] = selected_recs
 
     if st.session_state["selected_recommended"]:
         st.success(f"✨ Chosen from recommendations: {', '.join(st.session_state['selected_recommended'])}")
@@ -177,7 +171,7 @@ if not st.session_state["recommendations"].empty:
         stats = {
             "Mean": mean(pops),
             "Median": median(pops),
-            "Mode": mode_pop if not pd.isna(mode_pop) else 0,
+            "Mode": mode_pop if mode_pop != np.nan else "No unique mode",
             "Std Dev": np.std(pops)
         }
 
@@ -188,9 +182,4 @@ if not st.session_state["recommendations"].empty:
         ax.bar(keys, values, color='skyblue')
         ax.set_ylabel("Value")
         ax.set_title("Statistics of Selected Preferences")
-
-        # Annotate bars with values
-        for i, v in enumerate(values):
-            ax.text(i, v + 0.01, f"{v:.2f}" if isinstance(v, (int, float, np.floating)) else str(v), ha='center')
-
         st.pyplot(fig)
