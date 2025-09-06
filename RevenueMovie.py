@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from statistics import mean, median, mode, StatisticsError
 
 class PopularityRecommender:
     def __init__(self, movies_file):
@@ -160,31 +158,13 @@ if not st.session_state["recommendations"].empty:
     if st.button("🔄 Refresh Recommendations"):
         st.session_state["recommendations"] = st.session_state["recommendations"].sample(frac=1).reset_index(drop=True)
 
-    # Stats of user preferences as graph
-    all_selected = pd.concat([
-        recommender.movies[recommender.movies['title'].isin(st.session_state["selected_movies"])],
-        recommender.movies[recommender.movies['title'].isin(st.session_state["selected_recommended"])]
-    ])
+    # ================== Precision Calculation ==================
+    retrieved = len(st.session_state["recommendations"])
+    relevant = len(st.session_state["selected_recommended"])
 
-    if not all_selected.empty:
-        pops = all_selected["popularity"].values
-        try:
-            mode_pop = mode(pops)
-        except StatisticsError:
-            mode_pop = np.nan
-
-        stats = {
-            "Mean": mean(pops),
-            "Median": median(pops),
-            "Mode": mode_pop if not np.isnan(mode_pop) else 0,
-            "Std Dev": np.std(pops)
-        }
-
-        st.subheader("📊 Your Popularity Preferences (Stats)")
-        fig, ax = plt.subplots()
-        keys = list(stats.keys())
-        values = [v if isinstance(v, (int, float, np.floating)) else 0 for v in stats.values()]
-        ax.bar(keys, values, color='skyblue')
-        ax.set_ylabel("Value")
-        ax.set_title("Statistics of Selected Preferences")
-        st.pyplot(fig)
+    if retrieved > 0:
+        precision = relevant / retrieved
+        st.subheader("📊 Recommendation Precision")
+        st.metric("Precision", f"{precision:.2f}")
+    else:
+        st.info("No recommendations to calculate precision.")
