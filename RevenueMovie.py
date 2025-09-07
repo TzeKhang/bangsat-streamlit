@@ -13,15 +13,14 @@ import random
 def load_data():
     movies = pd.read_csv("dataset/RevenueMovies.csv")
 
-    # Check required columns
-    if "title" not in movies.columns or "revenue" not in movies.columns:
-        raise ValueError("CSV must contain 'title' and 'revenue' columns.")
+    # Ensure revenue column is numeric
+    movies['revenue'] = pd.to_numeric(movies['revenue'], errors='coerce').fillna(0)
+    movies['budget'] = pd.to_numeric(movies['budget'], errors='coerce').fillna(0)
+    movies['runtime'] = pd.to_numeric(movies['runtime'], errors='coerce').fillna(0)
+    movies['vote_average'] = pd.to_numeric(movies['vote_average'], errors='coerce').fillna(0)
+    movies['popularity'] = pd.to_numeric(movies['popularity'], errors='coerce').fillna(0)
 
-    # Replace missing revenue with median
-    movies['revenue'] = movies['revenue'].fillna(movies['revenue'].median())
-
-    # Fake "user interactions" for demo:
-    #   In practice, this should come from ratings or watch history
+    # Fake interactions (replace with real ratings if available)
     n_users = 50
     interactions = []
     for user in range(n_users):
@@ -48,19 +47,53 @@ def build_model(movies, interactions_df):
         [(row["user"], row["item"]) for _, row in interactions_df.iterrows()]
     )
 
-    # Add item features (e.g. revenue bucket)
-    movies["revenue_bucket"] = pd.qcut(movies["revenue"], 5, labels=False)
+    # ---- Item Features ----
+    item_features_list = []
+
+    # Revenue buckets
+    movies["revenue_bucket"] = pd.qcut(movies["revenue"], 5, labels=False, duplicates="drop")
+    item_features_list += ["revenue_" + str(r) for r in movies["revenue_bucket"].unique()]
+
+    # Budget buckets
+    movies["budget_bucket"] = pd.qcut(movies["budget"], 5, labels=False, duplicates="drop")
+    item_features_list += ["budget_" + str(b) for b in movies["budget_bucket"].unique()]
+
+    # Vote average buckets
+    movies["vote_bucket"] = pd.qcut(movies["vote_average"], 5, labels=False, duplicates="drop")
+    item_features_list += ["vote_" + str(v) for v in movies["vote_bucket"].unique()]
+
+    # Genres
+    all_genres = set()
+    movies["genres"] = movies["genres"].fillna("")
+    for g_list in movies["genres"].str.split("|"):
+        all_genres.update(g_list)
+    all_genres = [g for g in all_genres if g.strip() != ""]
+    item_features_list += list(all_genres)
+
+    # Register item features
     dataset.fit_partial(
         items=movies["title"].unique(),
-        item_features=["revenue_" + str(r) for r in movies["revenue_bucket"].unique()]
-    )
-    item_features = dataset.build_item_features(
-        [(row["title"], ["revenue_" + str(row["revenue_bucket"])]) for _, row in movies.iterrows()]
+        item_features=item_features_list
     )
 
-    # Train model
+    # Build item features mapping
+    def movie_features(row):
+        feats = []
+        feats.append("revenue_" + str(row["revenue_bucket"]))
+        feats.append("budget_" + str(row["budget_bucket"]))
+        feats.append("vote_" + str(row["vote_bucket"]))
+        for g in row["genres"].split("|"):
+            if g.strip() != "":
+                feats.append(g.strip())
+        return (row["title"], feats)
+
+    item_features = dataset.build_item_features(
+        [movie_features(row) for _, row in movies.iterrows()]
+    )
+
+    # Train LightFM model
     model = LightFM(loss="warp")
-    model.fit(interactions, item_features=item_features, epochs=15, num_threads=2)
+    model.fit(interactions, item_features=item_features, epochs=20, num_threads=4)
 
     return model, dataset, item_features
 
@@ -71,7 +104,7 @@ def recommend(model, dataset, item_features, user_id, movies, n=10):
     scores = model.predict(user_id, np.arange(n_items), item_features=item_features)
     top_items = np.argsort(-scores)[:n]
 
-    item_labels = list(dataset.mapping()[2].keys())
+    item_labels = list(dataset.mapping()[2].keys())  # index → title
     recommended = [item_labels[i] for i in top_items]
 
     return movies[movies["title"].isin(recommended)].copy()
@@ -84,22 +117,25 @@ def main():
     # Load data
     movies, interactions_df = load_data()
 
-    # Train LightFM
-    model, dataset, item_features = build_model(movies, interactions_df)
+    # Train model
+    with st.spinner("Training LightFM model... ⏳"):
+        model, dataset, item_features = build_model(movies, interactions_df)
 
+    # Show movie samples
     st.subheader("Available Movies")
-    st.dataframe(movies[["title", "revenue"]].head(20), width=800, height=400)
+    st.dataframe(movies[["title", "genres", "budget", "revenue", "vote_average", "popularity"]].head(20),
+                 width=1000, height=400)
 
-    # User ID selection
+    # Select user
     user_id = st.number_input("👤 Enter your User ID (0–49)", min_value=0, max_value=49, value=0)
 
     if st.button("📌 Show Recommendations"):
         recs = recommend(model, dataset, item_features, user_id, movies, n=10)
+        st.subheader("🎯 Recommended Movies")
+        st.dataframe(recs[["title", "genres", "budget", "revenue", "vote_average", "popularity"]],
+                     width=1000, height=400)
 
-        st.subheader("🎯 Recommended Movies for You")
-        st.dataframe(recs[["title", "revenue"]], width=800, height=400)
-
-    # Evaluate precision
+    # Model evaluation
     if st.button("📊 Evaluate Model Precision"):
         n_users, n_items = dataset.interactions_shape()
         prec = precision_at_k(model, dataset.build_interactions(
